@@ -171,7 +171,9 @@ def _prepare_for_pydantic(raw_keys: dict[str, Any]) -> dict[str, Any]:
       raise ValueError(f"{key!r} not in {', '.join(map(repr, valid_fields))}.")
 
     new_value = value
-    if isinstance(new_value, str) and new_value.lower() == "none":
+    # Keep remat_policy="none" as a literal string because the decoder logic
+    # recognizes it as a valid policy value.
+    if key != "remat_policy" and isinstance(new_value, str) and new_value.lower() == "none":
       new_value = None
 
     # Pydantic validates enums from their values, so string is fine.

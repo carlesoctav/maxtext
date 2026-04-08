@@ -57,12 +57,13 @@ def GEMMA3_MAXTEXT_TO_HF_PARAM_MAPPING(config, maxtext_config, scan_layers=False
 
   This function creates a dictionary that maps the parameter names from a
   MaxText Gemma3 checkpoint to their corresponding names in the Hugging Face
-  `Gemma3ForCausalLM` format. It handles both the text and vision components
-  of the model.
+  format. It supports both the text-only 1B model and the multimodal Gemma 3
+  variants.
 
   Args:
     config (dict): The Hugging Face model configuration dictionary, which must
-      contain 'text_config' and 'vision_config' sub-dictionaries.
+      either be a text config dictionary directly or contain 'text_config' and
+      optional 'vision_config' sub-dictionaries.
     scan_layers (bool, optional): If True, generates mappings for scanned
       layers, where multiple layers are stacked into a single tensor. If False,
       generates mappings for individual, unscanned layers. Defaults to False.
@@ -72,51 +73,58 @@ def GEMMA3_MAXTEXT_TO_HF_PARAM_MAPPING(config, maxtext_config, scan_layers=False
       are either a single Hugging Face parameter name (unscanned form) or a list of
       Hugging Face parameter names (scanned form) for stacked text layers.
   """
-  tcfg = config["text_config"]
-  vcfg = config["vision_config"]
+  tcfg = config.get("text_config", config)
+  vcfg = config.get("vision_config", {})
   Ndec = tcfg["num_hidden_layers"]
-  Nvis = vcfg["num_hidden_layers"]
+  Nvis = vcfg.get("num_hidden_layers", 0)
+  text_prefix = "model.language_model" if vcfg else "model"
 
   # pylint: disable=line-too-long
   mapping = {
       # Embedding & final norm
-      "params-token_embedder-embedding": "model.language_model.embed_tokens.weight",
-      "params-decoder-decoder_norm-scale": "model.language_model.norm.weight",
-      # Vision embed & pos
-      "params-vision_encoder-Gemma3VisionEncoderLayer_0-embedding-kernel": "model.vision_tower.vision_model.embeddings.patch_embedding.weight",
-      "params-vision_encoder-Gemma3VisionEncoderLayer_0-embedding-bias": "model.vision_tower.vision_model.embeddings.patch_embedding.bias",
-      "params-vision_encoder-Gemma3VisionEncoderLayer_0-pos_embedding": "model.vision_tower.vision_model.embeddings.position_embedding.weight",
-      "params-vision_encoder-Gemma3VisionEncoderLayer_0-Transformer-encoder_norm-scale": "model.vision_tower.vision_model.post_layernorm.weight",
-      "params-vision_encoder-Gemma3VisionEncoderLayer_0-Transformer-encoder_norm-bias": "model.vision_tower.vision_model.post_layernorm.bias",
-      # Multi-modal projector
-      "params-vision_encoder-VisionEmbedder_0-mm_input_projection-w": "model.multi_modal_projector.mm_input_projection_weight",
-      "params-vision_encoder-VisionEmbedder_0-mm_soft_embedding_norm-scale": "model.multi_modal_projector.mm_soft_emb_norm.weight",
+      "params-token_embedder-embedding": f"{text_prefix}.embed_tokens.weight",
+      "params-decoder-decoder_norm-scale": f"{text_prefix}.norm.weight",
   }
 
-  vision_params = [
-      ("LayerNorm_0-scale", "layer_norm1.weight"),
-      ("LayerNorm_0-bias", "layer_norm1.bias"),
-      ("LayerNorm_1-scale", "layer_norm2.weight"),
-      ("LayerNorm_1-bias", "layer_norm2.bias"),
-      ("MultiHeadDotProductAttention_0-query-kernel", "self_attn.q_proj.weight"),
-      ("MultiHeadDotProductAttention_0-query-bias", "self_attn.q_proj.bias"),
-      ("MultiHeadDotProductAttention_0-key-kernel", "self_attn.k_proj.weight"),
-      ("MultiHeadDotProductAttention_0-key-bias", "self_attn.k_proj.bias"),
-      ("MultiHeadDotProductAttention_0-value-kernel", "self_attn.v_proj.weight"),
-      ("MultiHeadDotProductAttention_0-value-bias", "self_attn.v_proj.bias"),
-      ("MultiHeadDotProductAttention_0-out-kernel", "self_attn.out_proj.weight"),
-      ("MultiHeadDotProductAttention_0-out-bias", "self_attn.out_proj.bias"),
-      ("MlpBlockViT_0-Dense_0-kernel", "mlp.fc1.weight"),
-      ("MlpBlockViT_0-Dense_0-bias", "mlp.fc1.bias"),
-      ("MlpBlockViT_0-Dense_1-kernel", "mlp.fc2.weight"),
-      ("MlpBlockViT_0-Dense_1-bias", "mlp.fc2.bias"),
-  ]
+  if vcfg:
+    mapping.update(
+        {
+            # Vision embed & pos
+            "params-vision_encoder-Gemma3VisionEncoderLayer_0-embedding-kernel": "model.vision_tower.vision_model.embeddings.patch_embedding.weight",
+            "params-vision_encoder-Gemma3VisionEncoderLayer_0-embedding-bias": "model.vision_tower.vision_model.embeddings.patch_embedding.bias",
+            "params-vision_encoder-Gemma3VisionEncoderLayer_0-pos_embedding": "model.vision_tower.vision_model.embeddings.position_embedding.weight",
+            "params-vision_encoder-Gemma3VisionEncoderLayer_0-Transformer-encoder_norm-scale": "model.vision_tower.vision_model.post_layernorm.weight",
+            "params-vision_encoder-Gemma3VisionEncoderLayer_0-Transformer-encoder_norm-bias": "model.vision_tower.vision_model.post_layernorm.bias",
+            # Multi-modal projector
+            "params-vision_encoder-VisionEmbedder_0-mm_input_projection-w": "model.multi_modal_projector.mm_input_projection_weight",
+            "params-vision_encoder-VisionEmbedder_0-mm_soft_embedding_norm-scale": "model.multi_modal_projector.mm_soft_emb_norm.weight",
+        }
+    )
 
-  # Vision layers mapping
-  for i in range(Nvis):
-    for mx, hf in vision_params:
-      key = f"params-vision_encoder-Gemma3VisionEncoderLayer_0-Transformer-encoderblock_{i}-{mx}"
-      mapping[key] = f"model.vision_tower.vision_model.encoder.layers.{i}.{hf}"
+    vision_params = [
+        ("LayerNorm_0-scale", "layer_norm1.weight"),
+        ("LayerNorm_0-bias", "layer_norm1.bias"),
+        ("LayerNorm_1-scale", "layer_norm2.weight"),
+        ("LayerNorm_1-bias", "layer_norm2.bias"),
+        ("MultiHeadDotProductAttention_0-query-kernel", "self_attn.q_proj.weight"),
+        ("MultiHeadDotProductAttention_0-query-bias", "self_attn.q_proj.bias"),
+        ("MultiHeadDotProductAttention_0-key-kernel", "self_attn.k_proj.weight"),
+        ("MultiHeadDotProductAttention_0-key-bias", "self_attn.k_proj.bias"),
+        ("MultiHeadDotProductAttention_0-value-kernel", "self_attn.v_proj.weight"),
+        ("MultiHeadDotProductAttention_0-value-bias", "self_attn.v_proj.bias"),
+        ("MultiHeadDotProductAttention_0-out-kernel", "self_attn.out_proj.weight"),
+        ("MultiHeadDotProductAttention_0-out-bias", "self_attn.out_proj.bias"),
+        ("MlpBlockViT_0-Dense_0-kernel", "mlp.fc1.weight"),
+        ("MlpBlockViT_0-Dense_0-bias", "mlp.fc1.bias"),
+        ("MlpBlockViT_0-Dense_1-kernel", "mlp.fc2.weight"),
+        ("MlpBlockViT_0-Dense_1-bias", "mlp.fc2.bias"),
+    ]
+
+    # Vision layers mapping
+    for i in range(Nvis):
+      for mx, hf in vision_params:
+        key = f"params-vision_encoder-Gemma3VisionEncoderLayer_0-Transformer-encoderblock_{i}-{mx}"
+        mapping[key] = f"model.vision_tower.vision_model.encoder.layers.{i}.{hf}"
 
   # Text decoder mapping
   text_params = [
@@ -147,7 +155,7 @@ def GEMMA3_MAXTEXT_TO_HF_PARAM_MAPPING(config, maxtext_config, scan_layers=False
       hf_indices = list(range(block_idx, num_scanned, attention_pattern_length))
       for mx, hf in text_params:
         key = f"params-decoder-layers-layers_{block_idx}-{mx}"
-        mapping[key] = [f"model.language_model.layers.{i}.{hf}" for i in hf_indices]
+        mapping[key] = [f"{text_prefix}.layers.{i}.{hf}" for i in hf_indices]
 
     # Remainder layers (unscanned): params-decoder-layers_remainder-layers_{rem_idx}-{param}
     if num_remaining > 0:
@@ -155,12 +163,12 @@ def GEMMA3_MAXTEXT_TO_HF_PARAM_MAPPING(config, maxtext_config, scan_layers=False
         hf_layer_idx = num_scanned + rem_idx
         for mx, hf in text_params:
           key = f"params-decoder-layers_remainder-layers_{rem_idx}-{mx}"
-          mapping[key] = f"model.language_model.layers.{hf_layer_idx}.{hf}"
+          mapping[key] = f"{text_prefix}.layers.{hf_layer_idx}.{hf}"
   else:
     for i in range(Ndec):
       for mx, hf in text_params:
         key = f"params-decoder-layers_{i}-{mx}"
-        mapping[key] = f"model.language_model.layers.{i}.{hf}"
+        mapping[key] = f"{text_prefix}.layers.{i}.{hf}"
 
   return mapping
 
@@ -184,6 +192,8 @@ def GEMMA3_MAXTEXT_TO_HF_PARAM_HOOK_FN(config, maxtext_config, scan_layers=False
     dict: A dictionary mapping MaxText parameter names to their corresponding
       transformation functions.
   """
+  text_config = config.get("text_config", config)
+  vision_config = config.get("vision_config", {})
   hooks = {}
 
   # ---- Embedding pad & scale ----
@@ -194,7 +204,7 @@ def GEMMA3_MAXTEXT_TO_HF_PARAM_HOOK_FN(config, maxtext_config, scan_layers=False
     # MaxText embedding = original_embedding * sqrt(hidden_size)
     # HF embedding = original_embedding (HF model forward pass applies scaling)
     # Note: config["hidden_size"] is the HF hidden size from the HF config object
-    normalizer = np.dtype("bfloat16").type(config["text_config"]["hidden_size"] ** 0.5)
+    normalizer = np.dtype("bfloat16").type(text_config["hidden_size"] ** 0.5)
 
     # Apply scaling first
     if saving_to_hf:  # MaxText to HF
@@ -263,16 +273,16 @@ def GEMMA3_MAXTEXT_TO_HF_PARAM_HOOK_FN(config, maxtext_config, scan_layers=False
   # ---Embedding & final norm---
   hooks["params-token_embedder-embedding"] = pad_and_scale_embedding
   hooks["params-decoder-decoder_norm-scale"] = scale_rmsnorm
-  # [1, 4096, 1152]
-  hooks["params-vision_encoder-Gemma3VisionEncoderLayer_0-embedding-kernel"] = vision_patch
-  hooks["params-vision_encoder-Gemma3VisionEncoderLayer_0-pos_embedding"] = pos_embed
+  if vision_config:
+    # [1, 4096, 1152]
+    hooks["params-vision_encoder-Gemma3VisionEncoderLayer_0-embedding-kernel"] = vision_patch
+    hooks["params-vision_encoder-Gemma3VisionEncoderLayer_0-pos_embedding"] = pos_embed
 
-  hooks["params-vision_encoder-VisionEmbedder_0-mm_input_projection-w"] = lambda x, _: x
-  hooks["params-vision_encoder-VisionEmbedder_0-mm_soft_embedding_norm-scale"] = scale_rmsnorm
+    hooks["params-vision_encoder-VisionEmbedder_0-mm_input_projection-w"] = lambda x, _: x
+    hooks["params-vision_encoder-VisionEmbedder_0-mm_soft_embedding_norm-scale"] = scale_rmsnorm
 
   # Text layers
-  tc = config.get("text_config", {})
-  nlayers = tc.get("num_hidden_layers", 0)
+  nlayers = text_config.get("num_hidden_layers", 0)
   if scan_layers:
     attention_pattern_length = 6
     num_remaining = nlayers % attention_pattern_length
@@ -305,8 +315,7 @@ def GEMMA3_MAXTEXT_TO_HF_PARAM_HOOK_FN(config, maxtext_config, scan_layers=False
     hooks[pref + "mlp-wo-kernel"] = reshape_kernel
 
   # Vision layers
-  vc = config.get("vision_config", {})
-  nvis = vc.get("num_hidden_layers", 0)
+  nvis = vision_config.get("num_hidden_layers", 0)
   for i in range(nvis):
     base = f"params-vision_encoder-Gemma3VisionEncoderLayer_0-Transformer-encoderblock_{i}-"
     # Attention kernels & biases
@@ -2887,6 +2896,7 @@ PARAM_MAPPING = {
     "gemma2-2b": GEMMA2_MAXTEXT_TO_HF_PARAM_MAPPING,
     "gemma2-9b": GEMMA2_MAXTEXT_TO_HF_PARAM_MAPPING,
     "gemma2-27b": GEMMA2_MAXTEXT_TO_HF_PARAM_MAPPING,
+    "gemma3-1b": GEMMA3_MAXTEXT_TO_HF_PARAM_MAPPING,
     "gemma3-4b": GEMMA3_MAXTEXT_TO_HF_PARAM_MAPPING,
     "gemma3-12b": GEMMA3_MAXTEXT_TO_HF_PARAM_MAPPING,
     "gemma3-27b": GEMMA3_MAXTEXT_TO_HF_PARAM_MAPPING,
@@ -2932,6 +2942,7 @@ HOOK_FNS = {
     "gemma2-2b": GEMMA2_MAXTEXT_TO_HF_PARAM_HOOK_FN,
     "gemma2-9b": GEMMA2_MAXTEXT_TO_HF_PARAM_HOOK_FN,
     "gemma2-27b": GEMMA2_MAXTEXT_TO_HF_PARAM_HOOK_FN,
+    "gemma3-1b": GEMMA3_MAXTEXT_TO_HF_PARAM_HOOK_FN,
     "gemma3-4b": GEMMA3_MAXTEXT_TO_HF_PARAM_HOOK_FN,
     "gemma3-12b": GEMMA3_MAXTEXT_TO_HF_PARAM_HOOK_FN,
     "gemma3-27b": GEMMA3_MAXTEXT_TO_HF_PARAM_HOOK_FN,

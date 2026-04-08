@@ -155,6 +155,39 @@ except AttributeError:
   gemma4_31b_config = PTConfig(**gemma4_31b_dict)
 
 
+gemma3_1b_config = transformers.Gemma3TextConfig(
+    architectures=["Gemma3ForCausalLM"],
+    attention_bias=False,
+    attention_dropout=0.0,
+    attn_logit_softcapping=None,
+    bos_token_id=2,
+    cache_implementation="hybrid",
+    eos_token_id=[1, 106],
+    final_logit_softcapping=None,
+    head_dim=256,
+    hidden_activation="gelu_pytorch_tanh",
+    hidden_size=1152,
+    initializer_range=0.02,
+    intermediate_size=6912,
+    max_position_embeddings=32768,
+    model_type="gemma3_text",
+    num_attention_heads=4,
+    num_hidden_layers=26,
+    num_key_value_heads=1,
+    pad_token_id=0,
+    query_pre_attn_scalar=256,
+    rms_norm_eps=1e-06,
+    rope_local_base_freq=10000.0,
+    rope_scaling=None,
+    rope_theta=1000000.0,
+    sliding_window=512,
+    sliding_window_pattern=6,
+    torch_dtype="bfloat16",
+    use_bidirectional_attention=False,
+    use_cache=True,
+    vocab_size=262144,
+)
+
 gemma3_4b_config = transformers.Gemma3Config(
     architectures=["Gemma3ForConditionalGeneration"],
     boi_token_index=255999,
@@ -1148,6 +1181,7 @@ HF_MODEL_CONFIGS = {
     "gemma2-2b": gemma2_2b_config,
     "gemma2-9b": gemma2_9b_config,
     "gemma2-27b": gemma2_27b_config,
+    "gemma3-1b": gemma3_1b_config,
     "gemma3-4b": gemma3_4b_config,
     "gemma3-12b": gemma3_12b_config,
     "gemma3-27b": gemma3_27b_config,

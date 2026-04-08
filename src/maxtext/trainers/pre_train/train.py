@@ -23,6 +23,7 @@ import contextlib
 import datetime
 import functools
 import os
+import time
 
 from absl import app
 
@@ -486,6 +487,7 @@ def eval_step(model, config, state, data, dropout_rng):
 
 def train_loop(config, recorder, state=None):
   """Main Training loop."""
+  compile_time_sec = None
   (
       init_rng,
       checkpoint_manager,
@@ -525,7 +527,10 @@ def train_loop(config, recorder, state=None):
       state = sharding.maybe_shard_with_name(state, state_mesh_shardings, config.shard_mode)
     maxtext_utils.maybe_dump_jaxpr(config, p_train_step, (state, shaped_batch, init_rng))
     if config.compiled_trainstep_file == "":  # compile only when there is no pre-compiled file loaded
+      compile_start = time.perf_counter()
       compiled = p_train_step.lower(state, shaped_batch, init_rng).compile()
+      compile_time_sec = time.perf_counter() - compile_start
+      max_logging.log(f"Compiled train step in {compile_time_sec:.3f} seconds")
       compiled_stats = compiled.memory_analysis()
       max_utils.print_compiled_memory_stats(compiled_stats)
 
@@ -535,6 +540,11 @@ def train_loop(config, recorder, state=None):
 
   # Write train config params, num model params, and XLA flags to tensorboard
   metric_logger.write_setup_info_to_tensorboard(state.params)
+  if compile_time_sec is not None:
+    max_logging.log(f"compile_time_sec: {compile_time_sec:.3f}")
+    if jax.process_index() == 0 and metric_logger.writer is not None:
+      metric_logger.writer.add_scalar("perf/compile_time_seconds", compile_time_sec, start_step)
+      metric_logger.writer.flush()
 
   _job_completed_gracefully = False
   try:
